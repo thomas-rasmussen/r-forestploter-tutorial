@@ -1,0 +1,1552 @@
+---
+title: "Making forest plots in R"
+format:
+  html:
+    toc: true
+    toc-expand: 1
+    toc-location: left
+    number-sections: true
+    self-contained: true
+    theme: cosmo
+    code-copy: true
+    code-summary: "Show the code"
+    code-links:
+      text: Source code
+      href: https://github.com/thomas-rasmussen/r-forestploter-tutorial
+      icon: github
+execute:
+  echo: true
+  eval: true
+knitr:
+  opts_chunk:
+    R.options:
+      width: 200
+fig-cap-location: top
+
+---
+
+```{r setup}
+#| include: false
+library(forestploter)
+library(grid)
+library(gt)
+
+# Define custom theme function for gt tables
+gt_theme_compact <- function(data, ...) {
+  data |>
+    tab_options(
+      data_row.padding = px(0),
+      column_labels.padding = px(0),
+      heading.padding = px(0)
+    )
+}
+```
+
+# Goal of tutorial
+
+The main goal of this tutorial is to introduce functions from **forestploter**
+that can be used to make and edit forest plots. This is done by making the
+forest plot in @sec-forest-plot-regression-estimates, step by step. Additional
+variations of forest plots that could be of interest is shown in
+@sec-forest-plot-multiple-ci-columns, @sec-forest-plot-grouped-ci-column, and
+@sec-forest-plot-meta-analysis.
+
+The focus of all examples and exercises in this tutorial is to showcase many
+of the elements of a forest plot made with **forestploter** that can be
+controlled, not to make plots that are necessarily *that* pretty (which is very
+subjective anyway). Feel to explore the documentation/vignettes, and diverge
+from the exercises along the way.
+
+
+# Setup
+
+## Packages used in this tutorial
+
+In this tutorial we use the following packages. Installing **ggplot2** is
+optional, we only use `ggplot2::ggsave()` briefly at one point.
+
+```{r}
+#| eval: false
+# install.packages("forestploter")
+# install.packages("ggplot2")
+library(forestploter)
+library(grid) # R base package,  no installation needed
+```
+
+The only data wrangling done in this tutorial will be very basic, and done using
+base R functions. If you prefer to use eg **dplyr** or **data.table** functions
+instead, feel free to do so.  
+
+
+# What is a forest plot {#sec-what-is-a-forest-plot}
+
+A forest plot is a graphical display of estimated results. Forest plots were 
+originally developed to present results from a meta-analysis. There are many
+variations of forest plots, and they are useful in many contexts. A common use of
+forest plots is to report parameter estimates and confidence intervals from
+regression models, sometimes also including some descriptive statistics. A
+forest plot of this type could look like the plot below.
+
+```{r}
+#| echo: false
+#| fig-align: center
+#| fig-height: 3.1
+#| fig-width: 9.2
+#| out-height: 90%
+#| out-width: 90%
+
+# Load data
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_regression.rds"))
+
+# Add empty column and reorder columns
+fp_dat[[" "]] <- paste(rep(" ", 20), collapse = " ")
+fp_dat <- fp_dat[, c(1:3, 8, 4:7)]
+
+# Rename columns
+names(fp_dat)[names(fp_dat) == "analysis"] <- " "
+names(fp_dat)[names(fp_dat) == "deaths_n_pct_0"] <- "Unexposed"
+names(fp_dat)[names(fp_dat) == "deaths_n_pct_1"] <- "Exposed"
+names(fp_dat)[names(fp_dat) == "hr_ci"] <- "Adjusted HR (95% CI)"
+
+# Specify theme
+fp_theme <- forest_theme(
+  refline_gp = gpar(lty = "dashed", col = "grey"),
+  arrow_gp = gpar(fontsize = 10),
+  arrow_type = "closed",
+  ci_pch = 16,
+  ci_lwd = 2,
+  core = list(
+    padding = unit(c(10, 5), "mm")
+  ),
+  colhead = list(padding = unit(c(10, 5), "mm"))
+)
+
+fp_plot <- forest(
+  data = fp_dat[, 1:5],
+  est = fp_dat$hr_est,
+  lower = fp_dat$hr_lcl,
+  upper = fp_dat$hr_ucl,
+  ci_column = 4,
+  x_trans = "log",
+  sizes = 0.6,
+  xlim = c(0.5, 10),
+  ticks_at = c(0.5, 1, 2, 5, 10),
+  arrow_lab = c("Favors exposure", "Favors no exposure"),
+  theme = fp_theme
+)
+
+fp_plot <- add_text(
+  plot = fp_plot,
+  text = "Deaths, N(%)",
+  row = 0,
+  col = 2:3,
+  part = "header",
+  gp = gpar(fontface = "bold")
+)
+
+fp_plot <- add_border(
+  plot = fp_plot,
+  row  = 0,
+  col  = 2:3,
+  part = "header",
+  where = "bottom",
+  gp = gpar(lwd = 0.5)
+)
+
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = 1, 
+  row = 1:3, 
+  which = "text", 
+  gp = gpar(fontface = "bold")
+)
+
+fp_plot <- edit_plot(
+  fp_plot,
+  col = c(2, 3, 5),
+  part = "body",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot <- edit_plot(
+  fp_plot,
+  part = "header",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot
+```
+
+## Packages to make forest plots
+
+Many packages have been developed in R to facilitate making publication-ready
+forest plots. Below is a list of some packages of interest.
+
+| Package name     | Notes                             |
+|------------------|-----------------------------------|
+| **meta**         | General package for meta-analysis |
+| **metafor**      | General package for meta-analysis |
+| **forester**     | Not actively maintained?          |
+| **forestplot**   |                                   |
+| **forestploter** |                                   |
+| **ggforestplot** | Not actively maintained?          |
+
+: Curated list of R packages for making forest plots {.striped}
+
+Since the main focus of this tutorial is not meta-analyses, we will not
+consider the **meta** and **metafor** package, whose main focus is to facilitate
+meta-analysis from start to end. Of the remaining packages, **forestploter**
+seems the most worthwhile to use in terms of being flexible, producing plots
+that look (subjectively) good, and being maintained actively. Therefore, we will
+focus on using that package in this tutorial. That being said, it could be
+worthwhile to explore some of the other packages if you need to make a forest
+plot, and you find that **forestploter** can't produce the type of forestplot
+you want to make.
+
+The main differences between **forestploter** and other packages that can make
+forest plots are:
+
+- Focuses specifically on making forest plots.
+- Forest plots are treated as tables, where elements are arranged in rows and
+  columns. Users have full control over what and how to display the content in
+  the plot.
+- Graphical parameters are controlled using themes.
+- Allows for ad-hoc editing of plots.
+- Support for drawing CI's in multiple or grouped columns.
+
+
+# Forest plot - Regression estimates {#sec-forest-plot-regression-estimates}
+
+In this section we will make a forest plot displaying estimates and 
+confidence intervals from regression models, including some additional
+desciptive statistics.
+
+```{r}
+#| echo: false
+#| fig-align: center
+#| fig-height: 3.1
+#| fig-width: 9.2
+#| out-height: 90%
+#| out-width: 90%
+
+fp_plot
+```
+
+The plot will be made using the following data
+
+```{r}
+#| echo: false
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_regression.rds"))
+
+fp_dat |>
+  gt() |>
+  tab_footnote(
+    "Data from S:/Stat day May 2025/forest_plots/data/forest_plot_regression.rds"
+  ) |>
+  gt_theme_compact() |>
+  tab_options(
+    table.font.size = px(14)
+  )
+```
+
+
+## Making a basic forest plot
+
+We can make a forestplot with `forestploter::forest()`. The layout of the
+forest plot is determined by the provided data.frame. Column names are used as
+a header, and the content of the data.frame will be shown in the forest plot. Furthermore, confidence intervals are drawn in specified column(s). This means
+that before we can make our forest plot, we need to manually add a column with
+empty values, where we will draw the confidence intervals. To make things a
+bit easier, we will also rearrange the columns of our data, so that the leftmost columns in the data matches the layout of the forest plot we want to make, with
+the rightmost column containing the numerical estimates needed to draw the
+confidence intervals. Finally, we also rename the columns.
+
+```{r}
+# Load data
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_regression.rds"))
+
+# Add empty column and reorder columns.
+fp_dat[[" "]] <- paste(rep(" ", 20), collapse = " ")
+fp_dat <- fp_dat[, c(1:3, 8, 4:7)]
+
+# Rename columns
+names(fp_dat)[names(fp_dat) == "analysis"] <- " "
+names(fp_dat)[names(fp_dat) == "deaths_n_pct_0"] <- "Unexposed"
+names(fp_dat)[names(fp_dat) == "deaths_n_pct_1"] <- "Exposed"
+names(fp_dat)[names(fp_dat) == "hr_ci"] <- "Adjusted HR (95% CI)"
+```
+
+The data now looks like this:
+
+```{r}
+#| echo: false
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+dat <- readRDS(paste0(path_data, "forest_plot_regression.rds"))
+
+# Add empty column and reorder columns
+dat[[" "]] <- paste(rep("\u2800", 5), collapse = " ")
+dat <- dat[, c(1:3, 8, 4:7)]
+
+dat %>%
+  gt() %>%
+  cols_label(
+    analysis = "",
+    deaths_n_pct_0 = "Deaths, N(%)",
+    deaths_n_pct_1 = "Deaths, N(%)",
+    hr_ci = "Adjusted HR (95% CI)"
+  ) %>%
+  gt_theme_compact() %>%
+  tab_options(
+    table.font.size = px(14)
+  ) %>%
+  tab_style(
+    style = cell_borders(color = "lightgrey", weight = px(1)),
+    locations = list(cells_body(), cells_column_labels())
+  )
+```
+
+We are now ready to produce a basic forest plot using the following code:
+
+```{r}
+#| fig-align: center
+#| fig-height: 2.4
+#| fig-width: 7.9
+#| out-height: 90%
+#| out-width: 90%
+
+fp_plot <- forest(
+  data = fp_dat[, 1:5],
+  est = fp_dat$hr_est,
+  lower = fp_dat$hr_lcl,
+  upper = fp_dat$hr_ucl,
+  ci_column = 4
+)
+
+fp_plot
+```
+Notes:
+
+- In the `data` argument we specify the data.frame that is used as a layout
+  for the plot. Note that this includes the empty column we have made where
+  the confidence intervals are to be displayed, but **not** the columns with the
+  estimates used to draw confidence intervals.
+- The `est`, `lower`, and `upper` arguments specify the vectors used to draw
+  the confidence intervals.
+- `ci_column `is used to specify the number of the column (in the data.frame
+  given in the `data` argument) where the confidence intervals will be drawn.
+- The width of the column where the confidence intervals are drawn is
+  determined by the width of the column. Increase/decrease the number of spaces
+  in the empty column if needed.
+
+We can see that several nice features are added to the forest plot by default:
+
+- x-axis under the confidence intervals.
+- Striped rows.
+- A vertical reference line indicating a null association (although in this
+  case it is incorrectly set at zero, not at one).
+
+::: {.callout-tip appearance="simple"}
+### Exercise
+
+Try to make the same forest plot using the following data.frame, where we do not
+reorder the columns in `fp_dat` before using `forest()`. What changes has to be
+made to the `data` and `ci_column` argument to make it work correctly?
+
+```{r}
+#| eval: false
+# Load data
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_regression.rds"))
+
+# Add empty column
+fp_dat[[" "]] <- paste(rep(" ", 20), collapse = " ")
+
+# Rename columns
+names(fp_dat)[names(fp_dat) == "analysis"] <- " "
+names(fp_dat)[names(fp_dat) == "deaths_n_pct_0"] <- "Unexposed"
+names(fp_dat)[names(fp_dat) == "deaths_n_pct_1"] <- "Exposed"
+names(fp_dat)[names(fp_dat) == "hr_ci"] <- "Adjusted HR (95% CI)"
+```
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Solution
+
+```{r}
+#| eval: false
+forest(
+  data = fp_dat[, c(1:3, 8, 4)],
+  est = fp_dat$hr_est,
+  lower = fp_dat$hr_lcl,
+  upper = fp_dat$hr_ucl,
+  ci_column = 4
+)
+```
+
+If we do not reorder the columns, we can reorder the column on the fly in
+the `data` argument. Note that we **still** have to specify `ci_column = 4`,
+since the empty column is still the fourth column in `fp_dat[, c(1:3, 8, 4)]`.
+:::
+
+So far, so good. Next, lets make some modifications to the x-axis using some
+additional arguments in `forest()`.
+
+::: {.callout-tip appearance="simple"}
+### Exercise
+
+- Log transform the x axis
+- Change the x-axis limits
+- Change the tick marks
+- Add arrows under the x-axis.
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Hint 1
+
+Look at the documentation for `forest()`
+```{r}
+#| eval: false
+?forest
+```
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Hint 2
+
+The arguments of interest in `forest()` are
+
+- Log transform the x axis: `x_trans`
+- Change the x-axis limits: `xlim`
+- Change the tick marks: `ticks_at`
+- Add arrows under the x-axis: `arrow_lab`
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Solution
+
+```{r}
+#| fig-align: center
+#| fig-height: 2.7
+#| fig-width: 7.8
+#| out-height: 90%
+#| out-width: 90%
+
+fp_plot <- forest(
+  data = fp_dat[, 1:5],
+  est = fp_dat$hr_est,
+  lower = fp_dat$hr_lcl,
+  upper = fp_dat$hr_ucl,
+  ci_column = 4,
+  x_trans = "log",
+  xlim = c(0.5, 10),
+  ticks_at = c(0.5, 1, 2, 5, 10),
+  arrow_lab = c("Favors exposure", "Favors no exposure")
+)
+
+fp_plot
+```
+
+Note that specifying `x_trans = "log"` automatically put the reference line
+at one as desired.
+:::
+
+
+## Forest plot themes
+
+The graphical parameters of the forest plot, eg colours, text justification, and
+font-sizes, can be controlled with a theme. The default theme can be adjusted by
+creating a theme with `forest_theme()` and passing the object in the `theme`
+argument in `forest()`.
+
+::: {.callout-tip appearance="simple"}
+### Exercise
+
+Apply the following theme to the forest plot.
+
+```{r}
+fp_theme <- forest_theme(
+  # Make the reference line a grey dashed line
+  refline_gp = gpar(lty = "dashed", col = "grey"),
+  # Change font-size of the arrows below the x-axis
+  arrow_gp = gpar(fontsize = 10),
+  # Change the appereance of the arrows below the x-axis.
+  arrow_type = "closed",
+  # Change shape of point estimate
+  ci_pch = 16,
+  # Change line width of CI
+  ci_lwd = 2,
+  # Change cell padding that is used in the body of the table
+  core = list(
+    padding = unit(c(10, 5), "mm")
+  ),
+  # Change cell padding in header
+  colhead = list(padding = unit(c(10, 5), "mm"))
+)
+```
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Solution
+
+```{r}
+#| echo: true
+#| fig-align: center
+#| fig-height: 3.1
+#| fig-width: 9.0
+#| out-height: 90%
+#| out-width: 90%
+
+fp_theme <- forest_theme(
+  # Make the reference line a grey dashed line
+  refline_gp = gpar(lty = "dashed", col = "grey"),
+  # Change font-size of the arrows below the x-axis
+  arrow_gp = gpar(fontsize = 10),
+  # Change the appereance of the arrows below the x-axis.
+  arrow_type = "closed",
+  # Change shape of point estimate
+  ci_pch = 16,
+  # Change line width of CI
+  ci_lwd = 2,
+  # Change cell padding that is used in the body of the table
+  core = list(
+    padding = unit(c(10, 5), "mm")
+  ),
+  # Change cell padding in header
+  colhead = list(padding = unit(c(10, 5), "mm"))
+)
+
+fp_plot <- forest(
+  data = fp_dat[, 1:5],
+  est = fp_dat$hr_est,
+  lower = fp_dat$hr_lcl,
+  upper = fp_dat$hr_ucl,
+  ci_column = 4,
+  x_trans = "log",
+  xlim = c(0.5, 10),
+  ticks_at = c(0.5, 1, 2, 5, 10),
+  arrow_lab = c("Favors exposure", "Favors no exposure"),
+  theme = fp_theme
+)
+
+fp_plot
+```
+:::
+
+
+## Adding text
+
+Text can be added to the forest plot using `add_text()`. We will use this
+function to add a line of text above the header row with the column names.
+
+::: {.callout-tip appearance="simple"}
+### Exercise
+
+Use `add_text()` to add the text "Deaths, N(%)" in a line above the header,
+spanning the columns "Unexposed" and "Exposed". Make the text bold.
+
+Note that the documentation for the `row` parameter seems to be wrong. You
+need to specify `row = 0` to get the header above the column labels.
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Hint 1
+
+Look at the documentation for `add_text()`
+
+```{r}
+#| eval: false
+?add_text()
+```
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Hint 2
+
+The text can be made bold using `gp = gpar(fontface = "bold")`
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Solution
+
+```{r}
+#| fig-align: center
+#| fig-height: 3.1
+#| fig-width: 9.0
+#| out-height: 90%
+#| out-width: 90%
+ 
+fp_plot <- add_text(
+  plot = fp_plot,
+  text = "Deaths, N(%)",
+  row = 0,
+  col = 2:3,
+  part = "header",
+  gp = gpar(fontface = "bold")
+)
+
+fp_plot
+```
+:::
+
+
+## Adding borders
+
+Borders can be added to any cell in the forest plot using `add_border()`.
+
+::: {.callout-tip appearance="simple"}
+### Exercise
+
+Underline the "Deaths, N(%)" text spanning column two and tree.
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Hint 1
+
+Look at the documentation for `add_border()`.
+
+```{r}
+#| eval: false
+?add_text()
+```
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Hint 2
+
+The width of the border can be made thinner using `gp = gpar(lwd = 0.5)`.
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Solution
+
+```{r}
+#| fig-align: center
+#| fig-height: 3.1
+#| fig-width: 9.0
+#| out-height: 90%
+#| out-width: 90%
+
+fp_plot <- add_border(
+  plot = fp_plot,
+  row  = 0,
+  col  = 2:3,
+  part = "header",
+  where = "bottom",
+  gp = gpar(lwd = 0.5)
+)
+
+fp_plot
+```
+:::
+
+
+## Further editing the plot
+
+The final basic function from **forestploter** we will showcase in this example
+is `edit_plot()`. This function can be used to edit the graphical parameters 
+of the text, background and CI's in the forest plot.
+
+::: {.callout-tip appearance="simple"}
+### Exercise
+
+- Change the font face of the three rows of the first column to bold.
+- Center justify text in column two, three, and five.
+- Center justify text in header.
+
+To specify center justification of text, add arguments `hjust = unit(0.5, "npc")`
+and `x = unit(0.5, "npc")` to `edit_plot()`.
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Solution
+
+```{r}
+#| fig-align: center
+#| fig-height: 3.1
+#| fig-width: 9.0
+#| out-height: 90%
+#| out-width: 90%
+
+# Make first three rows of column one bold
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = 1, 
+  row = 1:3, 
+  which = "text", 
+  gp = gpar(fontface = "bold")
+)
+
+# Center justify text in column two, three, and five
+fp_plot <- edit_plot(
+  fp_plot,
+  col = c(2, 3, 5),
+  part = "body",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+# Center justify text in the header
+fp_plot <- edit_plot(
+  fp_plot,
+  part = "header",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot
+```
+:::
+
+## Final plot
+
+The final plot should now look as below
+
+```{r}
+#| code-fold: true
+#| fig-align: center
+#| fig-height: 3.1
+#| fig-width: 9.0
+#| out-height: 90%
+#| out-width: 90%
+
+# Load data
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_regression.rds"))
+
+# Add empty column and reorder columns
+fp_dat[[" "]] <- paste(rep(" ", 20), collapse = " ")
+fp_dat <- fp_dat[, c(1:3, 8, 4:7)]
+
+# Rename columns
+names(fp_dat)[names(fp_dat) == "analysis"] <- " "
+names(fp_dat)[names(fp_dat) == "deaths_n_pct_0"] <- "Unexposed"
+names(fp_dat)[names(fp_dat) == "deaths_n_pct_1"] <- "Exposed"
+names(fp_dat)[names(fp_dat) == "hr_ci"] <- "Adjusted HR (95% CI)"
+
+# Specify theme
+fp_theme <- forest_theme(
+  refline_gp = gpar(lty = "dashed", col = "grey"),
+  arrow_gp = gpar(fontsize = 10),
+  arrow_type = "closed",
+  ci_pch = 16,
+  ci_lwd = 2,
+  core = list(
+    padding = unit(c(10, 5), "mm")
+  ),
+  colhead = list(padding = unit(c(10, 5), "mm"))
+)
+
+# Make forest plot
+fp_plot <- forest(
+  data = fp_dat[, 1:5],
+  est = fp_dat$hr_est,
+  lower = fp_dat$hr_lcl,
+  upper = fp_dat$hr_ucl,
+  ci_column = 4,
+  x_trans = "log",
+  sizes = 0.6,
+  xlim = c(0.5, 10),
+  ticks_at = c(0.5, 1, 2, 5, 10),
+  arrow_lab = c("Favors exposure", "Favors no exposure"),
+  theme = fp_theme
+)
+
+# Add text in header
+fp_plot <- add_text(
+  plot = fp_plot,
+  text = "Deaths, N(%)",
+  row = 0,
+  col = 2:3,
+  part = "header",
+  gp = gpar(fontface = "bold")
+)
+
+# Add line under header text
+fp_plot <- add_border(
+  plot = fp_plot,
+  row  = 0,
+  col  = 2:3,
+  part = "header",
+  where = "bottom",
+  gp = gpar(lwd = 0.5)
+)
+
+# Make first three rows of column one bold
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = 1, 
+  row = 1:3, 
+  which = "text", 
+  gp = gpar(fontface = "bold")
+)
+
+# Center justify text in column two, three, and five
+fp_plot <- edit_plot(
+  fp_plot,
+  col = c(2, 3, 5),
+  part = "body",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+# Center justify text in the header
+fp_plot <- edit_plot(
+  fp_plot,
+  part = "header",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot
+```
+
+## Saving the forest plot ##
+
+Finally, we probably want to save our finished forest plot. Below is an example
+of how to save the the plot using base R functions.
+
+```{r}
+#| eval: false
+
+# Get width and height of forest plot
+fp_plot_wh <- get_wh(plot = fp_plot, unit = "in")
+png(
+  'forest_plot.png',
+  res = 300,
+  width = fp_plot_wh[1],
+  height = fp_plot_wh[2],
+  units = "in"
+)
+fp_plot
+invisible(dev.off())
+```
+
+Since both **ggplot2** and **forestploter** is both built on grid graphics, we
+can also use `ggplot2::ggave()` to save the forestplot, which might feel more
+familiar to some people.
+
+```{r}
+#| eval: false
+
+# Get width and height of forest plot
+fp_plot_wh <- get_wh(fp_plot, unit = "in")
+ggplot2::ggsave(
+  filename = "forest_plot.svg",
+  plot = fp_plot,
+  width = fp_plot_wh[1],
+  height = fp_plot_wh[2],
+  units = "in"
+)
+
+```
+
+
+# Forest plot - multiple CI columns {#sec-forest-plot-multiple-ci-columns}
+
+Multiple CI columns can be drawn in a plot by specifying a vector of column
+positions in `ci_column`, and by specifying lists of vectors of the same length 
+as the vector given in `ci_column` in arguments used to draw the CI's, eg `est`,
+`lower`, and `upper`. The vectors in the first elements of the lists in `est`,
+`lower`, and `upper` will be used to draw the CI's in the column indicated in
+the first element of `ci_column` and so forth. Note that this also applies to
+arguments controlling graphical parameters of the CI columns, eg x-axes. This
+means that we can control the look of each CI column separately.
+
+In this section we will show how to make a simple forest plot with two CI
+columns, as seen below.
+
+```{r}
+#| echo: false
+#| fig-align: center
+#| fig-height: 2.1
+#| fig-width: 8.3
+#| out-height: 90%
+#| out-width: 90%
+
+# Load data
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_multiple_ci.rds"))
+
+# Make multiple empty columns. Two for drawing CI's, and one to separate
+# the two parts of the plot
+fp_dat$` ` <- paste0(rep(" ", 20), collapse = " ")
+fp_dat$`  ` <- paste0(rep(" ", 2), collapse = " ")
+fp_dat$`   ` <- paste0(rep(" ", 20), collapse = " ")
+names(fp_dat)[names(fp_dat) == "or_ci_1"] <- "OR (95% CI)"
+names(fp_dat)[names(fp_dat) == "or_ci_2"] <- "OR (95% CI)"
+names(fp_dat)[names(fp_dat) == "population"] <- "Population"
+
+fp_plot <- forest(
+  data = fp_dat[, c(1, 2, 10, 11, 3, 12)],
+  est = list(fp_dat$or_est_1, fp_dat$or_est_2),
+  lower = list(fp_dat$or_lcl_1, fp_dat$or_lcl_2),
+  upper = list(fp_dat$or_ucl_1, fp_dat$or_ucl_2),
+  ci_column = c(3, 6),
+  x_trans = "log",
+  xlim = list(c(0.5, 4), c(1, 5)),
+  ticks_at = list(c(0.5, 1, 2, 5), c(1, 2, 5))
+)
+
+fp_plot <- add_text(
+  plot = fp_plot,
+  text = "Outcome 1",
+  row = 0,
+  col = 2:3,
+  part = "header",
+  gp = gpar(fontface = "bold")
+)
+
+fp_plot <- add_text(
+  plot = fp_plot,
+  text = "Outcome 2",
+  row = 0,
+  col = 5:6,
+  part = "header",
+  gp = gpar(fontface = "bold")
+)
+
+fp_plot <- add_border(
+  plot = fp_plot,
+  row = 0,
+  col = 2:3,
+  part = "header",
+  where = "bottom",
+  gp = gpar(lwd = 0.5)
+)
+
+fp_plot <- add_border(
+  plot = fp_plot,
+  row = 0,
+  col = 5:6,
+  part = "header",
+  where = "bottom",
+  gp = gpar(lwd = 0.5)
+)
+
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = c(2, 5),
+  part = "body",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = c(2, 5),
+  part = "header",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot
+```
+
+The plot is made using the following data.
+
+```{r}
+#| echo: false
+
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+dat <- readRDS(paste0(path_data, "forest_plot_multiple_ci.rds"))
+
+dat |>
+  gt() |>
+  tab_footnote(
+    "Data from S:/Stat day May 2025/forest_plots/data/forest_plot_multiple_ci.rds"
+  ) |>
+  gt_theme_compact() |>
+  tab_options(
+    table.font.size = px(14)
+  )
+```
+
+::: {.callout-tip appearance="simple"}
+### Exercise
+
+Make the above plot using the provided data. The documentation in `forest()` on
+how to produce multiple CI columns is lacking unfortunately, but there is
+some documentation and examples in the introduction vignette, see section
+"Multiple CI columns".
+
+```{r}
+#| eval: false
+vignette("forestploter-intro", package = "forestploter")
+```
+
+Note that an additional empty column is used to separate the "Outcome 1"
+and "Outcome 2" columns. Thus, the plot has three columns with an empty
+header / column name. One way to have multiple columns with an empty column
+name in the same data.frame, is to use a different number of spaces in each
+column name.
+
+```{r}
+#| eval: false
+fp_dat$` ` <- paste0(rep(" ", 10), collapse = " ")
+fp_dat$`  ` <- paste0(rep(" ", 10), collapse = " ")
+fp_dat$`   ` <- paste0(rep(" ", 10), collapse = " ")
+```
+
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Solution
+
+```{r}
+#| fig-align: center
+#| fig-height: 2.1
+#| fig-width: 8.3
+#| out-height: 90%
+#| out-width: 90%
+
+# Load data
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_multiple_ci.rds"))
+
+# Make multiple empty columns. Two for drawing CI's, and one to separate
+# the two parts of the plot
+fp_dat$` ` <- paste0(rep(" ", 20), collapse = " ")
+fp_dat$`  ` <- paste0(rep(" ", 2), collapse = " ")
+fp_dat$`   ` <- paste0(rep(" ", 20), collapse = " ")
+names(fp_dat)[names(fp_dat) == "or_ci_1"] <- "OR (95% CI)"
+names(fp_dat)[names(fp_dat) == "or_ci_2"] <- "OR (95% CI)"
+names(fp_dat)[names(fp_dat) == "population"] <- "Population"
+
+fp_plot <- forest(
+  data = fp_dat[, c(1, 2, 10, 11, 3, 12)],
+  est = list(fp_dat$or_est_1, fp_dat$or_est_2),
+  lower = list(fp_dat$or_lcl_1, fp_dat$or_lcl_2),
+  upper = list(fp_dat$or_ucl_1, fp_dat$or_ucl_2),
+  ci_column = c(3, 6),
+  x_trans = "log",
+  xlim = list(c(0.5, 4), c(1, 5)),
+  ticks_at = list(c(0.5, 1, 2, 5), c(1, 2, 5))
+)
+
+# Add header text
+fp_plot <- add_text(
+  plot = fp_plot,
+  text = "Outcome 1",
+  row = 0,
+  col = 2:3,
+  part = "header",
+  gp = gpar(fontface = "bold")
+)
+
+fp_plot <- add_text(
+  plot = fp_plot,
+  text = "Outcome 2",
+  row = 0,
+  col = 5:6,
+  part = "header",
+  gp = gpar(fontface = "bold")
+)
+
+# Add borders
+fp_plot <- add_border(
+  plot = fp_plot,
+  row = 0,
+  col = 2:3,
+  part = "header",
+  where = "bottom",
+  gp = gpar(lwd = 0.5)
+)
+
+fp_plot <- add_border(
+  plot = fp_plot,
+  row = 0,
+  col = 5:6,
+  part = "header",
+  where = "bottom",
+  gp = gpar(lwd = 0.5)
+)
+
+# Center justify columns and headers
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = c(2, 5),
+  part = "body",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = c(2, 5),
+  part = "header",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot
+```
+:::
+
+
+# Forest plot - Grouped CI column {#sec-forest-plot-grouped-ci-column}
+
+::: {.callout-note collapse="false" appearance="simple"}
+This section assumes the reader has read @sec-forest-plot-multiple-ci-columns.
+:::
+
+To make a forest plot with a grouped CI column we can specify a single
+column in `ci_column`, and lists of columns in `est`, `lower`, `upper`. Using
+the same data as in @sec-forest-plot-multiple-ci-columns, we can make the plot
+below.
+
+```{r}
+#| echo: false
+#| fig-align: center
+#| fig-height: 2.1
+#| fig-width: 7.0
+#| out-height: 90%
+#| out-width: 90%
+
+# Load data
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_multiple_ci.rds"))
+
+# Make an empty column and rename columns
+fp_dat$` ` <- paste0(rep(" ", 20), collapse = " ")
+names(fp_dat)[names(fp_dat) == "or_ci_1"] <- "Outcome 1"
+names(fp_dat)[names(fp_dat) == "or_ci_2"] <- "Outcome 2"
+names(fp_dat)[names(fp_dat) == "population"] <- "Population"
+
+fp_theme <- forest_theme(
+  ci_col = c("green", "purple"),
+  legend_name = "",
+  legend_value = c("Outcome 1", "Outcome 2")
+)
+
+fp_plot <- forest(
+  data = fp_dat[, c(1, 2, 3, 10)],
+  est = list(fp_dat$or_est_1, fp_dat$or_est_2),
+  lower = list(fp_dat$or_lcl_1, fp_dat$or_lcl_2),
+  upper = list(fp_dat$or_ucl_1, fp_dat$or_ucl_2),
+  ci_column = 4,
+  x_trans = "log",
+  xlim = c(0.5, 5),
+  ticks_at = c(0.5, 1, 2, 5),
+  nudge_y = 0.4,
+  theme = fp_theme
+)
+
+# Add header text
+fp_plot <- add_text(
+  plot = fp_plot,
+  text = "OR (95% CI)",
+  row = 0,
+  col = 2:3,
+  part = "header",
+  gp = gpar(fontface = "bold")
+)
+
+# Add borders
+fp_plot <- add_border(
+  plot = fp_plot,
+  row = 0,
+  col = 2:3,
+  part = "header",
+  where = "bottom",
+  gp = gpar(lwd = 0.5)
+)
+
+# Center justify columns and headers
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = c(2, 3),
+  part = "body",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = c(2, 3),
+  part = "header",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot
+```
+
+::: {.callout-tip appearance="simple"}
+### Exercise
+
+Make the above plot using the provided data. The documentation in `forest()` on
+how to produce grouped CI columns is lacking unfortunately, but there is
+some documentation and examples in the introduction vignette, see section
+"Multiple CI columns".
+
+```{r}
+#| eval: false
+vignette("forestploter-intro", package = "forestploter")
+```
+
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Hint 1
+
+to control the spacing between CI's, use `nudge_y` in `forest()`.
+
+Graphical parameters of the CI's and the legend can be controlled with
+`forest_theme()`.
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Solution
+
+```{r}
+#| fig-align: center
+#| fig-height: 2.1
+#| fig-width: 7.0
+#| out-height: 90%
+#| out-width: 90%
+
+# Load data
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_multiple_ci.rds"))
+
+# Make an empty column and rename columns
+fp_dat$` ` <- paste0(rep(" ", 20), collapse = " ")
+names(fp_dat)[names(fp_dat) == "or_ci_1"] <- "Outcome 1"
+names(fp_dat)[names(fp_dat) == "or_ci_2"] <- "Outcome 2"
+names(fp_dat)[names(fp_dat) == "population"] <- "Population"
+
+fp_theme <- forest_theme(
+  ci_col = c("green", "purple"),
+  legend_name = "",
+  legend_value = c("Outcome 1", "Outcome 2")
+)
+
+fp_plot <- forest(
+  data = fp_dat[, c(1, 2, 3, 10)],
+  est = list(fp_dat$or_est_1, fp_dat$or_est_2),
+  lower = list(fp_dat$or_lcl_1, fp_dat$or_lcl_2),
+  upper = list(fp_dat$or_ucl_1, fp_dat$or_ucl_2),
+  ci_column = 4,
+  x_trans = "log",
+  xlim = c(0.5, 5),
+  ticks_at = c(0.5, 1, 2, 5),
+  nudge_y = 0.4,
+  theme = fp_theme
+)
+
+# Add header text
+fp_plot <- add_text(
+  plot = fp_plot,
+  text = "OR (95% CI)",
+  row = 0,
+  col = 2:3,
+  part = "header",
+  gp = gpar(fontface = "bold")
+)
+
+# Add borders
+fp_plot <- add_border(
+  plot = fp_plot,
+  row = 0,
+  col = 2:3,
+  part = "header",
+  where = "bottom",
+  gp = gpar(lwd = 0.5)
+)
+
+# Center justify columns and headers
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = c(2, 3),
+  part = "body",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  col = c(2, 3),
+  part = "header",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot
+```
+:::
+
+
+
+# Forest plot - Meta-analysis {#sec-forest-plot-meta-analysis}
+
+::: {.callout-note collapse="false" appearance="simple"}
+This section assumes the reader is familiar with meta-analysis.
+:::
+
+Packages like **meta** and **metafor** that can facilitate meta-analysis, also
+comes with functions that makes forest plots of the results. Making
+publication ready forest plots using these packages is easy, so if you need to
+make a forest plot from a meta-analysis, it is worthwhile to explore those
+packages. That being said, it is often necessary to make adjustments to the
+plots these packages can make. Some types of adjustments are easy to do. Others,
+not so much. The goal of this section is to illustrate how one can make forest
+plots using **forestploter** that incorporates some of the features
+other meta-analysis packages have. If you need to make a forest plot from a
+meta-analysis, and if it is difficult to achieve the desired result
+using other packages, maybe using **forestploter** is a viable alternative.
+
+The forest plot we will make is shown below. 
+
+```{r}
+#| echo: false
+#| fig-align: center
+#| fig-width: 7.3
+#| fig-height: 3.9
+#| out-width: 100%
+#| out-height: 100%
+
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_meta_analysis.rds"))
+
+fp_dat$` ` <- paste0(rep(" ", 20), collapse = " ")
+names(fp_dat)[names(fp_dat) == "study"] <- "Study ID"
+names(fp_dat)[names(fp_dat) == "n_events_treatment"] <- "Treatment"
+names(fp_dat)[names(fp_dat) == "n_events_placebo"] <- "Placebo"
+names(fp_dat)[names(fp_dat) == "rr_ci"] <- "RR (95% CI)"
+
+fp_theme <- forest_theme(
+  ci_alpha = 0.5,
+  core = list(bg_params = list(fill = c("white"))),
+  summary_col = "black",
+  summary_fill = "lightblue"
+)
+
+fp_plot <-forest(
+  data = fp_dat[, c(1:3, 10, 4)],
+  est = fp_dat$rr_estimate,
+  lower = fp_dat$rr_lcl,
+  upper = fp_dat$rr_ucl,
+  ci_column = 4,
+  sizes = fp_dat$weight,
+  x_trans = "log",
+  xlim = c(0.2, 10),
+  ticks_at = c(0.5, 1, 2, 5, 10),
+  is_summary = 1:nrow(fp_dat) == nrow(fp_dat),
+  theme = fp_theme
+)
+
+fp_plot <- add_text(
+  plot = fp_plot,
+  row = 0,
+  text = "Number of events",
+  part = "header",
+  col = 2:3,
+  gp = gpar(fontface = "bold")
+)
+
+# Add underline at the bottom of the header
+fp_plot <- add_border(
+  plot = fp_plot,
+  part = "header",
+  row = 0,
+  col = 2:3,
+  gp = gpar(lwd = 0.5)
+)
+
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  row = 11,
+  part = "body",
+  which = "background",
+  gp = gpar(fill = "#f6eff7")
+)
+
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  row = 11,
+  part = "body",
+  which = "text",
+  gp = gpar(fontface = "bold")
+)
+
+# Center justify text in columns
+fp_plot <- edit_plot(
+  fp_plot,
+  col = c(2, 3, 5),
+  part = "body",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+# Center justify text in the header
+fp_plot <- edit_plot(
+  fp_plot,
+  part = "header",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot
+```
+
+We will use the following data to make the plot:
+
+```{r}
+#| echo: false
+
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+dat <- readRDS(paste0(path_data, "forest_plot_meta_analysis.rds"))
+
+dat |>
+  gt() |>
+  gt_theme_compact() |>
+  tab_footnote(
+    "Data from S:/Stat day May 2025/forest_plots/data/forest_plot_meta_analysis.rds"
+  ) |>
+  tab_options(
+    table.font.size = px(10)
+  )
+```
+
+::: {.callout-tip appearance="simple"}
+### Exercise
+
+Make the above plot. The main aspects of the plot that have been modified are:
+
+- The size of point estimates depends on the weight the study was given.
+- The shape of the point estimate in the last row is a diamond.
+- Background colours have been modified, so that only the last row has a
+  non-white background colour.
+:::
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Hint 1
+
+- The size of point estimates can be controlled using the `sizes` argument
+  in `forest()`.
+- Use the `is_summary` argument in `forest()` to make the last row a summary
+  line, and control the graphical parameters of summary lines using
+  `forest_theme()`.
+- Remove the background colour using `forest_theme()`, then use `edit_plot()`
+  to add background colour to the last row.
+:::
+
+
+::: {.callout-tip collapse="true" appearance="simple"}
+### Solution
+
+```{r}
+#| fig-align: center
+#| fig-width: 7.3
+#| fig-height: 3.9
+#| out-width: 100%
+#| out-height: 100%
+
+path_data <- "S:/Stat day May 2025/forest_plots/data/"
+fp_dat <- readRDS(paste0(path_data, "forest_plot_meta_analysis.rds"))
+
+fp_dat$` ` <- paste0(rep(" ", 20), collapse = " ")
+names(fp_dat)[names(fp_dat) == "study"] <- "Study ID"
+names(fp_dat)[names(fp_dat) == "n_events_treatment"] <- "Treatment"
+names(fp_dat)[names(fp_dat) == "n_events_placebo"] <- "Placebo"
+names(fp_dat)[names(fp_dat) == "rr_ci"] <- "RR (95% CI)"
+
+fp_theme <- forest_theme(
+  ci_alpha = 0.5,
+  core = list(bg_params = list(fill = c("white"))),
+  summary_col = "black",
+  summary_fill = "lightblue"
+)
+
+fp_plot <-forest(
+  data = fp_dat[, c(1:3, 10, 4)],
+  est = fp_dat$rr_estimate,
+  lower = fp_dat$rr_lcl,
+  upper = fp_dat$rr_ucl,
+  ci_column = 4,
+  sizes = fp_dat$weight,
+  x_trans = "log",
+  xlim = c(0.2, 10),
+  ticks_at = c(0.5, 1, 2, 5, 10),
+  is_summary = 1:nrow(fp_dat) == nrow(fp_dat),
+  theme = fp_theme
+)
+
+fp_plot <- add_text(
+  plot = fp_plot,
+  row = 0,
+  text = "Number of events",
+  part = "header",
+  col = 2:3,
+  gp = gpar(fontface = "bold")
+)
+
+# Add underline at the bottom of the header
+fp_plot <- add_border(
+  plot = fp_plot,
+  part = "header",
+  row = 0,
+  col = 2:3,
+  gp = gpar(lwd = 0.5)
+)
+
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  row = 11,
+  part = "body",
+  which = "background",
+  gp = gpar(fill = "#f6eff7")
+)
+
+fp_plot <- edit_plot(
+  plot = fp_plot,
+  row = 11,
+  part = "body",
+  which = "text",
+  gp = gpar(fontface = "bold")
+)
+
+# Center justify text in columns
+fp_plot <- edit_plot(
+  fp_plot,
+  col = c(2, 3, 5),
+  part = "body",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+# Center justify text in the header
+fp_plot <- edit_plot(
+  fp_plot,
+  part = "header",
+  which = "text",
+  hjust = unit(0.5, "npc"),
+  x = unit(0.5, "npc")
+)
+
+fp_plot
+```
+
+:::
